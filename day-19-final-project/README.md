@@ -1,40 +1,41 @@
 # Freelance Marketplace DApp
 
-A Solidity learning project that explores how a freelance marketplace could use smart contracts to coordinate clients, freelancers, jobs, payments, and reputation on Ethereum.
+A Solidity learning project that models a decentralized freelance marketplace on Ethereum. Clients can publish jobs with an ETH bounty held by the contract, freelancers can accept available jobs, and the client can approve completion to release the bounty. The contract also tracks platform listing fees and a simple on-chain reputation score.
 
-> **Project status:** Requirements and use-case modeling  
-> **Format:** Final project, built incrementally across two study sessions  
-> **Primary focus:** Smart-contract design, state management, access control, and safe workflow transitions
-
-This project is part of my ongoing **Web3 & Blockchain learning journey**. The goal is not only to make a contract compile, but to understand the rules that govern the marketplace and encode them clearly in Solidity.
-
----
+> **Project status:** Core contract implemented and manually tested in Remix. This is an educational project, not a production-ready or audited marketplace.
 
 ## Table of Contents
 
-- [Project Overview](#project-overview)
+- [Overview](#overview)
+- [Features](#features)
 - [Project Structure](#project-structure)
-- [Problem Statement](#problem-statement)
-- [Actors and Use Cases](#actors-and-use-cases)
-- [Use-Case Diagram](#use-case-diagram)
-- [High-Level Workflow](#high-level-workflow)
-- [Design Questions to Resolve](#design-questions-to-resolve)
-- [Two-Session Implementation Plan](#two-session-implementation-plan)
-- [Learning Objectives](#learning-objectives)
-- [Current Scope and Limitations](#current-scope-and-limitations)
+- [Architecture](#architecture)
+- [Job Lifecycle](#job-lifecycle)
+- [Payment and Accounting Model](#payment-and-accounting-model)
+- [Contract Interface](#contract-interface)
+- [Manual Testing](#manual-testing)
+- [Security Considerations and Limitations](#security-considerations-and-limitations)
+- [Future Improvements](#future-improvements)
 
----
+## Overview
 
-## Project Overview
+The project explores how selected rules of a freelance marketplace can be enforced by a smart contract rather than relying exclusively on a traditional centralized backend.
 
-The Freelance Marketplace DApp models a marketplace where clients publish jobs and freelancers discover and accept suitable work. The project also considers payment and reputation as part of the overall user experience.
+In a conventional Web2 marketplace, a backend service and database commonly manage job listings, assignments, payment status, and reputation records. In this project, the job lifecycle and ETH escrow rules are represented in Solidity and executed according to Ethereum's protocol.
 
-The current use-case model contains six primary actions:
+The contract does not provide a frontend or a complete marketplace service. It is the on-chain component that a future DApp frontend could interact with.
 
-- **Client:** Post Job, Review Job
-- **Freelancer:** Browse Jobs, Accept Job, Get Paid, Build Reputation
+## Features
 
-The use-case diagram captures the intended user interactions. The exact smart-contract rules behind those interactions will be defined before implementation, rather than assumed from the diagram alone.
+- **Post a job:** A client publishes a title and description and sends ETH to cover both the listing fee and a positive bounty.
+- **Escrow a bounty:** The contract keeps the bounty reserved until the job is completed or an open job is cancelled.
+- **Accept a job:** A freelancer can accept an open job. The client cannot accept their own job, and a job cannot be accepted again after its status changes.
+- **Approve completion and pay:** The client marks a taken job as completed. The contract releases the bounty to the assigned freelancer and increases their reputation score.
+- **Cancel an open job:** The client can cancel a job only while it is open. The bounty is refunded, while the listing fee remains accrued to the platform.
+- **Track platform fees:** Listing fees are recorded separately from escrowed bounties.
+- **Withdraw platform fees:** Only the owner can withdraw accrued platform fees.
+- **Update the listing fee:** Only the owner can change the fee for future job listings.
+- **Inspect marketplace data:** Callers can retrieve one job, retrieve all jobs, inspect the contract's ETH balance, and read public state variables.
 
 ## Project Structure
 
@@ -45,128 +46,121 @@ day-19-final-project/
 └── FreelanceMarketplace.sol
 ```
 
-- `FreelanceMarketplace.sol` is the initial Solidity contract scaffold. It intentionally contains no marketplace logic yet; requirements and payment rules will be clarified before implementation.
-- `FreelanceMarketplace-UseCase.drawio` contains the editable use-case diagram.
-- `README.md` documents the project's goals, use cases, and implementation plan.
+- `FreelanceMarketplace.sol`: Solidity implementation. The contract is named `FreelancingPlatform`.
+- `FreelanceMarketplace-UseCase.drawio`: editable use-case diagram for the actors and main interactions.
+- `README.md`: project scope, design, workflow, interface, and test checklist.
 
-## Problem Statement
-
-In a conventional Web2 freelance marketplace, a platform's backend and database usually manage job listings, assignment, payment state, and reviews. Users rely on the platform operator to apply the rules and maintain its records.
-
-A blockchain-based design can place selected rules and state transitions in a smart contract, where transactions are processed according to the network's protocol. This does not automatically make every part of an application decentralized: a frontend, hosting, notifications, file storage, and other services may still be operated separately.
-
-This project is a small learning exercise for exploring which marketplace rules could be represented in Solidity and what trade-offs that introduces.
-
-## Actors and Use Cases
-
-| Actor | Use case | Intended purpose |
-|---|---|---|
-| Client | **Post Job** | Publish a job with the details required by the marketplace. |
-| Client | **Review Job** | Submit a review under the rules agreed for the project. |
-| Freelancer | **Browse Jobs** | Discover jobs that are available to accept. |
-| Freelancer | **Accept Job** | Accept an eligible job, subject to the marketplace's assignment rules. |
-| Freelancer | **Get Paid** | Receive payment when the agreed payment conditions are met. |
-| Freelancer | **Build Reputation** | Build a reputation through the marketplace's review process. |
-
-These descriptions are intentionally high-level. A use case describes what an actor wants to achieve; it does not, by itself, specify permissions, validation rules, payment mechanics, or every possible failure condition.
-
-## Use-Case Diagram
-
-The following diagram is also available as an editable Draw.io file: [`FreelanceMarketplace-UseCase.drawio`](./FreelanceMarketplace-UseCase.drawio).
+## Architecture
 
 ```mermaid
-flowchart LR
-    Client([Client])
-    Freelancer([Freelancer])
-
-    subgraph Marketplace[Freelance Marketplace DApp]
-        direction TB
-        PostJob([Post Job])
-        ReviewJob([Review Job])
-        BrowseJobs([Browse Jobs])
-        AcceptJob([Accept Job])
-        GetPaid([Get Paid])
-        BuildRep([Build Reputation])
-    end
-
-    Client --- PostJob
-    Client --- ReviewJob
-    Freelancer --- BrowseJobs
-    Freelancer --- AcceptJob
-    Freelancer --- GetPaid
-    Freelancer --- BuildRep
-
-    classDef actor fill:#E0F2FE,stroke:#0369A1,color:#0F172A,stroke-width:1.5px;
-    classDef usecase fill:#F8FAFC,stroke:#64748B,color:#0F172A,stroke-width:1.5px;
-    class Client,Freelancer actor;
-    class PostJob,ReviewJob,BrowseJobs,AcceptJob,GetPaid,BuildRep usecase;
+flowchart TB
+    Client[Client] -->|Posts job and deposits ETH| Contract[FreelancingPlatform Smart Contract]
+    Freelancer[Freelancer] -->|Browses and accepts jobs| Contract
+    Client -->|Approves completed work| Contract
+    Contract -->|Releases bounty| Freelancer
+    Contract -->|Tracks reputation| Reputation[(Reputation Mapping)]
+    Owner[Platform Owner] -->|Updates listing fee / withdraws fees| Contract
+    Public[Public Visitor] -->|Reads jobs and contract balance| Contract
 ```
 
-## High-Level Workflow
+The contract can be paired with a frontend and wallet integration later. Those off-chain components are outside the current scope.
 
-The diagram suggests this broad user journey:
+## Job Lifecycle
 
-1. A client posts a job.
-2. Freelancers browse the available listings.
-3. A freelancer accepts a job according to the contract's eligibility and assignment rules.
-4. The marketplace handles payment when its defined conditions are satisfied.
-5. A client can review the job, and the review process contributes to freelancer reputation according to the rules we implement.
+```mermaid
+stateDiagram-v2
+    [*] --> Open: postJob()
+    Open --> Taken: acceptJob()
+    Taken --> Completed: completeJob() / pay freelancer
+    Open --> Cancelled: cancelJob() / refund bounty
+```
 
-This is a conceptual workflow, not yet a final state machine. For example, the current diagram does not specify all job statuses or exactly when work is considered complete.
+The current contract supports cancellation only while the job is `Open`. It does not implement cancellation or dispute resolution after a freelancer has accepted a job.
 
-## Design Questions to Resolve
+## Payment and Accounting Model
 
-Before writing the full implementation, the following rules need to be made explicit:
+When `postJob()` is called, `msg.value` must exceed the current `listingFee` so that the job has a positive bounty.
 
-- **Job data:** Which fields are required when a client posts a job?
-- **Access control:** Who can post, accept, review, or trigger a payment-related action?
-- **Assignment:** Can a job be accepted by only one freelancer, and how is a job made unavailable after acceptance?
-- **Lifecycle:** Which job statuses are needed, and which transitions are allowed?
-- **Payment:** Who provides funds, when does payment become available, and what happens if the work is not completed? The diagram includes “Get Paid” but does not define an escrow model or payment conditions.
-- **Reviews and reputation:** Who may submit a review, when can it be submitted, and how do we prevent duplicate or unrelated reviews?
-- **Failure cases:** What should happen if someone calls a function at the wrong stage or without the required permissions?
+```text
+ETH sent with postJob
+├── listingFee  -> recorded in platformFeesAccrued
+└── remaining   -> stored as the job bounty and added to totalEscrowed
+```
 
-These decisions will guide the contract's data model, functions, modifiers, events, and tests.
+Accounting variables:
 
-## Two-Session Implementation Plan
+- `totalEscrowed`: total bounty funds reserved for jobs that have not reached a terminal state.
+- `platformFeesAccrued`: listing fees collected but not yet withdrawn.
+- `getPlatformBalance()`: the contract's raw ETH balance. This includes both escrowed funds and accrued platform fees; it should not be interpreted as freely withdrawable revenue.
 
-### Session 1: Foundation and Core Job Flow
+When a job is completed, its bounty is transferred to the assigned freelancer and removed from `totalEscrowed`. When an open job is cancelled, its bounty is refunded to the client and removed from `totalEscrowed`. The listing fee is not refunded by the current cancellation policy.
 
-- Confirm the requirements and rules above.
-- Define the job data model and required state.
-- Plan the core flows for posting, browsing, and accepting jobs.
-- Implement and test the agreed initial behavior.
+Under normal contract flows, the contract's balance should cover `totalEscrowed + platformFeesAccrued`. Ethereum contracts can sometimes receive ETH outside the ordinary function flow, so raw balance and internal accounting are conceptually distinct.
 
-### Session 2: Completion, Payment, and Reputation
+## Contract Interface
 
-- Complete the remaining agreed job lifecycle.
-- Implement payment behavior only after its rules are clear.
-- Add the review and reputation flow.
-- Test permissions, invalid state transitions, duplicate actions, and relevant edge cases.
-- Update this README to document the final implementation and test results.
+| Function | Access | Purpose |
+|---|---|---|
+| `postJob(title, description)` | Any caller, payable | Creates an open job and accounts for the listing fee and bounty. |
+| `getJob(jobID)` | Public read | Returns a job after validating its ID. |
+| `getAllJobs()` | Public read | Returns all jobs currently recorded by the contract. |
+| `acceptJob(jobID)` | Any caller other than the client | Assigns an open job to one freelancer. |
+| `completeJob(jobID)` | Job's client only | Marks a taken job complete, pays its bounty, and rewards reputation. |
+| `cancelJob(jobID)` | Job's client only | Cancels an open job and refunds its bounty. |
+| `setListingFee(amount)` | Owner only | Updates the listing fee for future jobs. |
+| `withdrawPlatformFees()` | Owner only | Withdraws fees accumulated by the platform. |
+| `getPlatformBalance()` | Public read | Returns the contract's current ETH balance in wei. |
 
-The plan may be adjusted as we clarify the requirements. The aim is to build understanding and correct behavior incrementally, not to rush into code before the rules are clear.
+Important state and behavior:
 
-## Learning Objectives
+- `JobStatus` defines `Open`, `Taken`, `Completed`, and `Cancelled`.
+- `jobs` stores job details by ID. Job IDs start at `1`.
+- `freelancerReputation` increases by `REPUTATION_REWARD` when the client completes a job.
+- Events record job creation, acceptance, completion, cancellation, fee updates, and platform fee withdrawals.
+- Custom errors are used for common invalid operations and access-control failures.
 
-Through this project, I aim to practise:
+## Manual Testing
 
-- Modeling real-world entities and relationships in Solidity.
-- Managing contract state and job lifecycle transitions.
-- Applying access control and validation rules.
-- Designing clear function interfaces and custom error handling where appropriate.
-- Emitting events for important state changes.
-- Thinking about payment safety, trust assumptions, and smart-contract limitations.
-- Testing both successful workflows and invalid or unauthorized actions.
-- Documenting a project so that its purpose and design can be understood by others.
+The contract was compiled and manually tested in Remix. Re-run these checks after any changes:
 
-## Current Scope and Limitations
+| Scenario | Expected result |
+|---|---|
+| Post a job with listing fee plus a positive bounty | Job is created as `Open`; fee and escrow accounting increase. |
+| Send less than the required listing fee | Transaction reverts with `InsufficientFunds`. |
+| Send exactly the listing fee without a bounty | Transaction reverts with `BountyMustBePositive`. |
+| Accept a valid open job from a non-client account | Job becomes `Taken` and records the freelancer. |
+| Client tries to accept their own job | Transaction reverts. |
+| Call a job function with an invalid job ID | Transaction reverts with `JobNotFound`. |
+| Client completes a taken job | Job becomes `Completed`, bounty is paid, escrow decreases, and reputation increases. |
+| A non-client attempts to complete the job | Transaction reverts. |
+| Client cancels an open job | Job becomes `Cancelled` and the bounty is refunded. |
+| Client tries to cancel a taken job | Transaction reverts. |
+| Non-owner attempts to change the fee or withdraw platform fees | Transaction reverts. |
+| Owner withdraws accrued listing fees | Only accrued platform fees are transferred; escrowed bounties remain reserved. |
 
-- This is an educational project, not a production-ready freelance platform.
-- The use-case diagram is a starting point; payment, completion, and reputation rules still need to be specified and tested.
-- A compiling contract is not necessarily secure. Any future deployment involving real funds would require substantially more testing and an independent security review.
-- The current diagram describes user interactions. It does not imply that every part of a future application, such as its frontend or file storage, will be decentralized.
+These are manual scenario checks, not a formal automated test suite or an independent security audit.
+
+## Security Considerations and Limitations
+
+- **Educational scope:** Do not treat this project as production-ready or deploy it with valuable funds without further work and a professional security review.
+- **No dispute process:** The contract trusts the client to approve completion. It does not arbitrate disagreements between clients and freelancers.
+- **Cancellation policy:** Only open jobs can be cancelled. There is no cancellation path after acceptance.
+- **Simple reputation:** Reputation increases automatically on completion. There are no star ratings, written reviews, or protections against collusive behavior beyond the contract's current rules.
+- **Unbounded job listing:** `getAllJobs()` loops over every job. It is convenient for a small learning project, but a production frontend should consider pagination, event indexing, or another scalable read pattern.
+- **Owner privileges:** The owner can change the listing fee and withdraw accrued fees. Users must understand this trust assumption.
+- **Manual tests only:** No automated test framework or formal audit is included in this repository version.
+- **External ETH transfers:** Payment operations use low-level `call` and check success. More comprehensive testing and security analysis are still necessary.
+
+## Future Improvements
+
+- Add automated unit tests with Foundry or Hardhat.
+- Add a frontend and wallet connection.
+- Add pagination or indexed queries for job listings.
+- Define a dispute and cancellation policy for jobs that have already been accepted.
+- Extend the reputation model with reviews and additional validation rules.
+- Consider a stronger ownership model, such as a two-step ownership transfer, if administrative control remains necessary.
+- Perform an independent security review before any real-value deployment.
 
 ---
 
-**Learning in public:** This project is part of my ongoing journey to understand not just how to write Solidity, but how to design and reason about smart-contract systems.
+This project is part of my ongoing Web3 and Blockchain learning journey, focusing on applying Solidity concepts to a more complete smart-contract workflow.
